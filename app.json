@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Connect",
+    "slug": "hd-stream-client",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-screen-orientation",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "android": {
+      "package": "com.serverstart.connect",
+      "permissions": [
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "CHANGE_WIFI_STATE"
+      ],
+      "versionCode": 2,
+      "blockedPermissions": []
+    },
+    "extra": {
+      "eas": {
+        "projectId": "d3519ff5-9840-4050-8bfa-396b924a7e37"
+      }
+    },
+    "owner": "serverstart"
+  }
+}
