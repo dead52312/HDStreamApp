@@ -8,11 +8,13 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
-  BackHandler
+  BackHandler,
+  StatusBar
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Network from 'expo-network';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function App() {
   const [myIP, setMyIP] = useState('');
@@ -23,7 +25,10 @@ export default function App() {
   const [scanProgress, setScanProgress] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [showQRScanner, setShowQRScanner] = useState(false);
+  const [qrScanned, setQrScanned] = useState(false);
 
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const webViewRef = useRef(null);
 
   useEffect(() => {
@@ -31,12 +36,13 @@ export default function App() {
     Network.getIpAddressAsync().then(ip => setMyIP(ip || '0.0.0.0'));
 
     const backAction = () => {
+      if (showQRScanner) { closeQRScanner(); return true; }
       if (streamUrl) { disconnect(); return true; }
       return false;
     };
     const backHandler = BackHandler.addEventListener("hardwareBackPress", backAction);
     return () => backHandler.remove();
-  }, [streamUrl]);
+  }, [streamUrl, showQRScanner]);
 
   const connectToServer = (url) => {
     let cleanUrl = url.trim();
@@ -44,6 +50,44 @@ export default function App() {
     if (!cleanUrl.startsWith('http')) cleanUrl = `http://${cleanUrl}`;
     setLoading(true);
     setStreamUrl(cleanUrl);
+  };
+
+  const openQRScanner = async () => {
+    if (!cameraPermission?.granted) {
+      const result = await requestCameraPermission();
+      if (!result.granted) {
+        Alert.alert(
+          "Camera Permission Required",
+          "Please allow camera access to scan QR codes.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+    }
+    setQrScanned(false);
+    setShowQRScanner(true);
+  };
+
+  const closeQRScanner = () => {
+    setShowQRScanner(false);
+    setQrScanned(false);
+  };
+
+  const handleQRScanned = ({ data }) => {
+    if (qrScanned) return;
+    setQrScanned(true);
+
+    // Accept http/https links or plain IPs
+    if (data && (data.startsWith('http') || data.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/))) {
+      setShowQRScanner(false);
+      connectToServer(data);
+    } else {
+      Alert.alert(
+        "Invalid QR Code",
+        "This QR code doesn't contain a valid server address.\n\nExpected: http://192.168.x.x:5000",
+        [{ text: "Scan Again", onPress: () => setQrScanned(false) }, { text: "Cancel", onPress: closeQRScanner }]
+      );
+    }
   };
 
   const toggleFullscreen = async () => {
@@ -62,7 +106,6 @@ export default function App() {
     await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
   };
 
-  // Reliable timeout using Promise.race
   const fetchWithTimeout = (url, ms = 1200) => {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), ms);
@@ -119,6 +162,53 @@ export default function App() {
     }
   };
 
+  // --- QR SCANNER VIEW ---
+  if (showQRScanner) {
+    return (
+      <View style={styles.qrContainer}>
+        <StatusBar barStyle="light-content" backgroundColor="#000" />
+        <CameraView
+          style={StyleSheet.absoluteFillObject}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+          onBarcodeScanned={qrScanned ? undefined : handleQRScanned}
+        />
+
+        {/* Dark overlay with hole effect */}
+        <View style={styles.qrOverlay}>
+          <View style={styles.qrTopOverlay} />
+          <View style={styles.qrMiddleRow}>
+            <View style={styles.qrSideOverlay} />
+            <View style={styles.qrFrame}>
+              {/* Corner markers */}
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+            </View>
+            <View style={styles.qrSideOverlay} />
+          </View>
+          <View style={styles.qrBottomOverlay} />
+        </View>
+
+        {/* Header */}
+        <View style={styles.qrHeader}>
+          <TouchableOpacity style={styles.qrCloseBtn} onPress={closeQRScanner}>
+            <Text style={styles.qrCloseBtnText}>✕</Text>
+          </TouchableOpacity>
+          <Text style={styles.qrTitle}>Scan QR Code</Text>
+          <View style={{ width: 46 }} />
+        </View>
+
+        {/* Bottom hint */}
+        <View style={styles.qrHint}>
+          <Text style={styles.qrHintText}>Point camera at server QR code</Text>
+          <Text style={styles.qrHintSub}>The QR code should contain the server's HTTP link</Text>
+        </View>
+      </View>
+    );
+  }
+
   // --- STREAM VIEW ---
   if (streamUrl) {
     return (
@@ -169,6 +259,15 @@ export default function App() {
     <View style={styles.container}>
       <Text style={styles.title}>🎥 Connect</Text>
       <Text style={styles.subtitle}>Your IP: {myIP}</Text>
+
+      {/* QR Scanner */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>QR CODE</Text>
+        <TouchableOpacity style={styles.qrBtn} onPress={openQRScanner}>
+          <Text style={styles.qrBtnIcon}>▦</Text>
+          <Text style={styles.qrBtnText}>SCAN QR CODE</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Manual Entry */}
       <View style={styles.section}>
@@ -235,6 +334,7 @@ export default function App() {
         <View style={styles.tipBox}>
           <Text style={styles.tipTitle}>💡 Tips</Text>
           <Text style={styles.tipText}>
+            • Scan server QR code for instant connect{'\n'}
             • Enter IP manually if scan fails{'\n'}
             • Allow Python through Windows Firewall{'\n'}
             • Both devices must be on same WiFi{'\n'}
@@ -302,6 +402,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#374151'
+  },
+  qrBtn: {
+    backgroundColor: '#10b981',
+    padding: 16,
+    borderRadius: 10,
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10
+  },
+  qrBtnIcon: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: 'bold'
+  },
+  qrBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 14,
+    letterSpacing: 1
   },
   btnDisabled: {
     opacity: 0.35
@@ -400,5 +520,108 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: 'bold'
+  },
+
+  // QR Scanner styles
+  qrContainer: {
+    flex: 1,
+    backgroundColor: '#000'
+  },
+  qrOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    flexDirection: 'column'
+  },
+  qrTopOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)'
+  },
+  qrMiddleRow: {
+    flexDirection: 'row',
+    height: 260
+  },
+  qrSideOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.65)'
+  },
+  qrFrame: {
+    width: 260,
+    height: 260,
+    position: 'relative'
+  },
+  qrBottomOverlay: {
+    flex: 1.5,
+    backgroundColor: 'rgba(0,0,0,0.65)'
+  },
+  corner: {
+    position: 'absolute',
+    width: 28,
+    height: 28,
+    borderColor: '#10b981',
+    borderWidth: 3
+  },
+  cornerTL: {
+    top: 0, left: 0,
+    borderBottomWidth: 0, borderRightWidth: 0,
+    borderTopLeftRadius: 4
+  },
+  cornerTR: {
+    top: 0, right: 0,
+    borderBottomWidth: 0, borderLeftWidth: 0,
+    borderTopRightRadius: 4
+  },
+  cornerBL: {
+    bottom: 0, left: 0,
+    borderTopWidth: 0, borderRightWidth: 0,
+    borderBottomLeftRadius: 4
+  },
+  cornerBR: {
+    bottom: 0, right: 0,
+    borderTopWidth: 0, borderLeftWidth: 0,
+    borderBottomRightRadius: 4
+  },
+  qrHeader: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  },
+  qrCloseBtn: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  qrCloseBtnText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  qrTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold'
+  },
+  qrHint: {
+    position: 'absolute',
+    bottom: 80,
+    left: 20,
+    right: 20,
+    alignItems: 'center'
+  },
+  qrHintText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: 'bold',
+    marginBottom: 6
+  },
+  qrHintSub: {
+    color: '#aaa',
+    fontSize: 12,
+    textAlign: 'center'
   }
 });

@@ -9,6 +9,12 @@
     "plugins": [
       "expo-screen-orientation",
       [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Connect to access your camera to scan QR codes."
+        }
+      ],
+      [
         "expo-build-properties",
         {
           "android": {
@@ -23,9 +29,10 @@
         "INTERNET",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
-        "CHANGE_WIFI_STATE"
+        "CHANGE_WIFI_STATE",
+        "CAMERA"
       ],
-      "versionCode": 2,
+      "versionCode": 3,
       "blockedPermissions": []
     },
     "extra": {
