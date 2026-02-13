@@ -1,0 +1,88 @@
+name: Build Android APK
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch: # Allow manual trigger from GitHub UI
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout code
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Node.js
+      - name: 🟢 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # 3. Install dependencies
+      - name: 📦 Install Dependencies
+        run: npm install
+
+      # 4. Setup Expo + EAS
+      - name: 🚀 Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # 5. Build APK using EAS
+      - name: 🔨 Build APK
+        run: eas build --platform android --profile preview --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      # 6. Download the built APK from EAS
+      - name: 📲 Download APK from EAS
+        run: |
+          # Get the latest build URL
+          BUILD_URL=$(eas build:list --platform android --limit 1 --json --non-interactive | node -e "
+            const data = JSON.parse(require('fs').readFileSync('/dev/stdin', 'utf8'));
+            console.log(data[0]?.artifacts?.buildUrl || '');
+          ")
+          
+          echo "Build URL: $BUILD_URL"
+          
+          if [ -n "$BUILD_URL" ]; then
+            curl -L "$BUILD_URL" -o app-release.apk
+            echo "✅ APK downloaded successfully"
+            ls -lh app-release.apk
+          else
+            echo "⚠️ Could not get download URL - check EAS dashboard"
+          fi
+
+      # 7. Upload APK as GitHub artifact
+      - name: 📤 Upload APK as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HDStream-APK-${{ github.run_number }}
+          path: ./*.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+      # 8. Print summary
+      - name: 📊 Build Summary
+        if: always()
+        run: |
+          echo "================================================"
+          echo "✅ Build Complete!"
+          echo "================================================"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Build #: ${{ github.run_number }}"
+          echo "================================================"
+          echo "Download APK from:"
+          echo "EAS Dashboard → https://expo.dev"
+          echo "================================================"
