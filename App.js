@@ -15,6 +15,8 @@ import { WebView } from 'react-native-webview';
 import * as Network from 'expo-network';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Sharing from 'expo-sharing';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function App() {
   const [myIP, setMyIP] = useState('');
@@ -161,6 +163,28 @@ export default function App() {
       );
     }
   };
+  const handleDownload = async (downloadUrl) => {
+  try {
+    const filename = downloadUrl.split('/').pop();
+    const fileUri = FileSystem.documentDirectory + filename;
+    
+    const downloadResumable = FileSystem.createDownloadResumable(
+      downloadUrl,
+      fileUri
+    );
+
+    const { uri } = await downloadResumable.downloadAsync();
+    
+    if (await Sharing.isAvailableAsync()) {
+      await Sharing.shareAsync(uri);
+    } else {
+      Alert.alert("Success", `File saved to: ${uri}`);
+    }
+  } catch (e) {
+    Alert.alert("Download Error", "Could not download the file.");
+    console.error(e);
+  }
+};
 
   // --- QR SCANNER VIEW ---
   if (showQRScanner) {
@@ -218,6 +242,7 @@ export default function App() {
           source={{ uri: streamUrl }}
           style={styles.webview}
           originWhitelist={['*']}
+          onFileDownload={({ nativeEvent: { downloadUrl } }) => handleDownload(downloadUrl)}
           mixedContentMode="always"
           javaScriptEnabled={true}
           domStorageEnabled={true}
