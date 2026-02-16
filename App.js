@@ -17,7 +17,7 @@ import {
 import { WebView } from 'react-native-webview';
 import * as Network from 'expo-network';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
