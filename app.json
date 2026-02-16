@@ -8,7 +8,6 @@
     "userInterfaceStyle": "dark",
     "plugins": [
       "expo-screen-orientation",
-      "expo-media-library",
       [
         "expo-camera",
         {
@@ -31,9 +30,7 @@
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_STATE",
-        "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",
-        "ACCESS_MEDIA_LOCATION",
         "CAMERA"
       ],
       "versionCode": 3,
