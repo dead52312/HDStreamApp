@@ -30,6 +30,7 @@
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
         "CHANGE_WIFI_STATE",
+        "WRITE_EXTERNAL_STORAGE",
         "CAMERA"
       ],
       "versionCode": 3,
