@@ -15,6 +15,7 @@ import { WebView } from 'react-native-webview';
 import * as Network from 'expo-network';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import * as Sharing from 'expo-sharing';
+import * as MediaLibrary from 'expo-media-library';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function App() {
@@ -162,25 +163,33 @@ export default function App() {
       );
     }
   };
-  const handleDownload = async (downloadUrl) => {
+const handleDownload = async (downloadUrl) => {
   try {
+    // 1. Request Permissions
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert("Permission Denied", "We need storage access to save downloads.");
+      return;
+    }
+
+    // 2. Initial download to internal cache
     const filename = downloadUrl.split('/').pop();
     const fileUri = FileSystem.documentDirectory + filename;
     
-    const downloadResumable = FileSystem.createDownloadResumable(
-      downloadUrl,
-      fileUri
-    );
-
+    const downloadResumable = FileSystem.createDownloadResumable(downloadUrl, fileUri);
     const { uri } = await downloadResumable.downloadAsync();
+
+    // 3. Move to Public Downloads/ConnectApp
+    // This creates an asset in the media library
+    const asset = await MediaLibrary.createAssetAsync(uri);
     
-    if (await Sharing.isAvailableAsync()) {
-      await Sharing.shareAsync(uri);
-    } else {
-      Alert.alert("Success", `File saved to: ${uri}`);
-    }
+    // This moves the asset into a folder named "ConnectApp"
+    // If the folder doesn't exist, Android will create it.
+    await MediaLibrary.createAlbumAsync("ConnectApp", asset, false);
+
+    Alert.alert("Success", `Saved to Downloads/ConnectApp/${filename}`);
   } catch (e) {
-    Alert.alert("Download Error", "Could not download the file.");
+    Alert.alert("Download Error", "Could not save the file.");
     console.error(e);
   }
 };
