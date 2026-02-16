@@ -9,13 +9,16 @@ import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  StatusBar
+  StatusBar,
+  PermissionsAndroid,
+  Platform,
+  ToastAndroid
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as Network from 'expo-network';
 import * as ScreenOrientation from 'expo-screen-orientation';
+import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import * as MediaLibrary from 'expo-media-library';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 export default function App() {
@@ -163,36 +166,115 @@ export default function App() {
       );
     }
   };
-const handleDownload = async (downloadUrl) => {
-  try {
-    // 1. Request Permissions
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert("Permission Denied", "We need storage access to save downloads.");
-      return;
+  // ─── Download handler ─────────────────────────────────────────────────────
+  // Works for ALL file types on Android (pdf, zip, mp4, jpg, etc.)
+  // Saves to:  <internal cache>/Connect/<filename>  then shares / confirms
+  const handleDownload = async (downloadUrl) => {
+    try {
+      // --- 1. Request WRITE_EXTERNAL_STORAGE on Android < 10 ----------------
+      if (Platform.OS === 'android' && Platform.Version < 29) {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+          {
+            title: 'Storage Permission',
+            message: 'Connect needs storage access to save downloaded files.',
+            buttonPositive: 'Allow',
+          }
+        );
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert('Permission Denied', 'Storage permission is required to download files.');
+          return;
+        }
+      }
+
+      // --- 2. Build destination path inside app's cache --------------------
+      //   FileSystem.cacheDirectory  →  e.g. file:///data/user/0/<pkg>/cache/
+      //   We create a "Connect" sub-folder so files are grouped together.
+      const connectDir = FileSystem.cacheDirectory + 'Connect/';
+      const dirInfo = await FileSystem.getInfoAsync(connectDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(connectDir, { intermediates: true });
+      }
+
+      // Derive a clean filename from the URL (strip query-string if any)
+      const rawName = downloadUrl.split('/').pop().split('?')[0] || 'download';
+      const filename = decodeURIComponent(rawName);
+      const destUri  = connectDir + filename;
+
+      // --- 3. Show a toast so the user knows the download started ----------
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(`Downloading ${filename}…`, ToastAndroid.SHORT);
+      }
+
+      // --- 4. Download the file --------------------------------------------
+      const downloadResumable = FileSystem.createDownloadResumable(
+        downloadUrl,
+        destUri,
+        {},
+        // Progress callback – optional, kept lightweight
+        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+          if (totalBytesExpectedToWrite > 0) {
+            const pct = Math.round((totalBytesWritten / totalBytesExpectedToWrite) * 100);
+            // Could drive a progress bar here; for now just log
+            console.log(`Download progress: ${pct}%`);
+          }
+        }
+      );
+
+      const result = await downloadResumable.downloadAsync();
+      if (!result || !result.uri) {
+        throw new Error('Download returned no URI');
+      }
+
+      // --- 5. Offer to open / share the file (works for ALL mime types) ----
+      const canShare = await Sharing.isAvailableAsync();
+      if (canShare) {
+        // On Android this opens the standard "Open with" / share sheet
+        await Sharing.shareAsync(result.uri, {
+          dialogTitle: `File saved – ${filename}`,
+          // Expo Sharing auto-detects mime type from extension
+        });
+      } else {
+        Alert.alert(
+          '✅ Downloaded',
+          `"${filename}" saved to Connect folder.\n\nPath: Connect/${filename}`
+        );
+      }
+
+    } catch (err) {
+      console.error('Download error:', err);
+      Alert.alert(
+        'Download Failed',
+        `Could not download the file.\n\n${err.message || 'Unknown error'}`
+      );
     }
+  };
+  // ─── Injected JS: intercept all download-intent clicks on Android ─────────
+  // WebView on Android does NOT fire onFileDownload. Instead we hook every
+  // anchor click that carries a "download" attribute or points to a file, and
+  // post the URL back via window.ReactNativeWebView.postMessage so the RN
+  // side can call handleDownload().
+  const INJECTED_JS = `
+    (function() {
+      function interceptDownload(e) {
+        var el = e.target;
+        // Walk up the DOM in case the click landed on a child element
+        while (el && el.tagName !== 'A') el = el.parentElement;
+        if (!el) return;
 
-    // 2. Initial download to internal cache
-    const filename = downloadUrl.split('/').pop();
-    const fileUri = FileSystem.documentDirectory + filename;
-    
-    const downloadResumable = FileSystem.createDownloadResumable(downloadUrl, fileUri);
-    const { uri } = await downloadResumable.downloadAsync();
+        var href = el.href || '';
+        var hasDownload = el.hasAttribute('download');
+        var looksLikeFile = /\\.(pdf|zip|rar|7z|tar|gz|mp4|mp3|avi|mkv|mov|docx?|xlsx?|pptx?|apk|exe|dmg|iso|csv|json|txt|png|jpe?g|gif|webp|svg)(\\?.*)?$/i.test(href);
 
-    // 3. Move to Public Downloads/ConnectApp
-    // This creates an asset in the media library
-    const asset = await MediaLibrary.createAssetAsync(uri);
-    
-    // This moves the asset into a folder named "ConnectApp"
-    // If the folder doesn't exist, Android will create it.
-    await MediaLibrary.createAlbumAsync("ConnectApp", asset, false);
-
-    Alert.alert("Success", `Saved to Downloads/ConnectApp/${filename}`);
-  } catch (e) {
-    Alert.alert("Download Error", "Could not save the file.");
-    console.error(e);
-  }
-};
+        if (hasDownload || looksLikeFile) {
+          e.preventDefault();
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'DOWNLOAD', url: href }));
+        }
+      }
+      document.addEventListener('click', interceptDownload, true);
+    })();
+    true; // required return value
+  `;
 
   // --- QR SCANNER VIEW ---
   if (showQRScanner) {
@@ -250,7 +332,18 @@ const handleDownload = async (downloadUrl) => {
           source={{ uri: streamUrl }}
           style={styles.webview}
           originWhitelist={['*']}
+          // iOS: fires when the browser would normally prompt a download
           onFileDownload={({ nativeEvent: { downloadUrl } }) => handleDownload(downloadUrl)}
+          // Android: receives messages posted by INJECTED_JS
+          onMessage={(event) => {
+            try {
+              const msg = JSON.parse(event.nativeEvent.data);
+              if (msg.type === 'DOWNLOAD' && msg.url) {
+                handleDownload(msg.url);
+              }
+            } catch (_) {}
+          }}
+          injectedJavaScript={INJECTED_JS}
           mixedContentMode="always"
           javaScriptEnabled={true}
           domStorageEnabled={true}
